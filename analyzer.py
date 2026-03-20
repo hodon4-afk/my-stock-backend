@@ -42,7 +42,7 @@ def get_naver_rank_tickers(investor_gubun="9000", market="KOSPI"):
         return []
 
 
-def get_naver_historical_investor(ticker, n_days=10):
+def get_naver_historical_investor(ticker, n_days=5):
     """
     Scrape historical foreign + institutional net buying from Naver Finance
     URL  : https://finance.naver.com/item/frgn.naver?code={ticker}
@@ -113,8 +113,8 @@ def analyze_double_buying(market="KOSPI"):
     for t in inst_top:
         candidates[t['ticker']] = t['name']
 
-    # Limit candidates to top 40 to avoid Render timeout (30s)
-    candidate_list = list(candidates.items())[:40]
+    # Limit candidates to top 20 to avoid Render timeout (30s)
+    candidate_list = list(candidates.items())[:20]
     print(f"[+] Processing top {len(candidate_list)} candidates. Fetching history ...")
 
     new_double        = []
@@ -123,7 +123,7 @@ def analyze_double_buying(market="KOSPI"):
 
     for i, (code, name) in enumerate(candidate_list):
         try:
-            df = get_naver_historical_investor(code, n_days=10)
+            df = get_naver_historical_investor(code, n_days=5)
             if df.empty:
                 continue
 
