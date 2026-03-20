@@ -18,6 +18,23 @@ app.add_middleware(
 # Cache to avoid hammering KRX
 cache = {}
 
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "Double-Buying Analyzer API is running"}
+
+@app.get("/api/health")
+def health():
+    return {"status": "healthy", "timestamp": time.time()}
+
+@app.get("/api/stocks/debug")
+def get_stocks_debug():
+    # Return dummy data immediately to test connection/CORS
+    return {
+        "new": [{"ticker": "000000", "name": "TEST_STOCK", "market": "KOSPI", "foreign": 100, "inst": 200}],
+        "continuous": [],
+        "ended": []
+    }
+
 @app.get("/api/stocks")
 def get_stocks(market: str = "KOSPI"):
     # very simple caching: 1 hour
