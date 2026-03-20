@@ -113,13 +113,15 @@ def analyze_double_buying(market="KOSPI"):
     for t in inst_top:
         candidates[t['ticker']] = t['name']
 
-    print(f"[+] {len(candidates)} candidates. Fetching history ...")
+    # Limit candidates to top 40 to avoid Render timeout (30s)
+    candidate_list = list(candidates.items())[:40]
+    print(f"[+] Processing top {len(candidate_list)} candidates. Fetching history ...")
 
     new_double        = []
     continuous_double = []
     ended_double      = []
 
-    for i, (code, name) in enumerate(candidates.items()):
+    for i, (code, name) in enumerate(candidate_list):
         try:
             df = get_naver_historical_investor(code, n_days=10)
             if df.empty:
@@ -177,9 +179,6 @@ def analyze_double_buying(market="KOSPI"):
 
         except Exception as e:
             print(f"[Error] {name} ({code}): {e}")
-
-        if (i + 1) % 20 == 0:
-            time.sleep(0.3)
 
     new_double.sort(       key=lambda x: x['foreign'] + x['inst'], reverse=True)
     # Primary: Days (descending), Secondary: Name (ascending)
