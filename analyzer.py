@@ -1,5 +1,6 @@
 import pandas as pd
-import requests
+import aiohttp
+import asyncio
 import time
 from bs4 import BeautifulSoup
 
@@ -13,11 +14,9 @@ HEADERS = {
 }
 
 
-def get_naver_rank_tickers(investor_gubun="9000", market="KOSPI"):
+async def get_naver_rank_tickers(session, investor_gubun="9000", market="KOSPI"):
     """
-    Scrape top net-buyers from Naver Finance ranking.
-    investor_gubun: 9000 = Foreigner, 1000 = Institutional
-    market: KOSPI or KOSDAQ
+    Scrape top net-buyers from Naver Finance ranking asynchronously.
     """
     sosok = "01" if market == "KOSPI" else "02"
     url = (
@@ -26,107 +25,123 @@ def get_naver_rank_tickers(investor_gubun="9000", market="KOSPI"):
     )
     headers = {**HEADERS, 'Referer': 'https://finance.naver.com/sise/sise_deal_rank.naver'}
     try:
-        res = requests.get(url, headers=headers, timeout=10)
-        res.encoding = 'euc-kr'
-        soup = BeautifulSoup(res.text, 'lxml')
+        async with session.get(url, headers=headers, timeout=10) as res:
+            text = await res.text(encoding='euc-kr')
+            soup = BeautifulSoup(text, 'lxml')
 
-        tickers = []
-        for a in soup.select('a.tltle'):
-            if 'code=' in a['href']:
-                code = a['href'].split('code=')[-1]
-                name = a.get_text(strip=True)
-                tickers.append({'ticker': code, 'name': name})
-        return tickers
+            tickers = []
+            for a in soup.select('a.tltle'):
+                if 'code=' in a['href']:
+                    code = a['href'].split('code=')[-1]
+                    name = a.get_text(strip=True)
+                    tickers.append({'ticker': code, 'name': name})
+            return tickers
     except Exception as e:
         print(f"[Error] get_naver_rank_tickers ({market}, {investor_gubun}): {e}")
         return []
 
 
-def get_naver_historical_investor(ticker, n_days=5):
+async def get_naver_historical_investor(session, ticker, n_days=20):
     """
-    Scrape historical foreign + institutional net buying from Naver Finance
-    URL  : https://finance.naver.com/item/frgn.naver?code={ticker}
-    cols : inst_net (col 5), foreign_net (col 6)
-    Returns a DataFrame indexed by YYYYMMDD, oldest first.
+    Scrape historical foreign + institutional net buying asynchronously.
     """
-    url = f"https://finance.naver.com/item/frgn.naver?code={ticker}"
     headers = {**HEADERS, 'Referer': f'https://finance.naver.com/item/main.naver?code={ticker}'}
+    data = []
+    page = 1
+    max_pages = 3  # 최대 3페이지 (약 30거래일)
+
     try:
-        res = requests.get(url, headers=headers, timeout=10)
-        res.encoding = 'euc-kr'
-        soup = BeautifulSoup(res.text, 'lxml')
+        while len(data) < n_days and page <= max_pages:
+            url = f"https://finance.naver.com/item/frgn.naver?code={ticker}&page={page}"
+            async with session.get(url, headers=headers, timeout=10) as res:
+                text = await res.text(encoding='euc-kr')
+                soup = BeautifulSoup(text, 'lxml')
 
-        rows = soup.select('table.type2 tr[onmouseover]')
+                rows = soup.select('table.type2 tr[onmouseover]')
+                if not rows:
+                    break
 
-        data = []
-        for row in rows:
-            cols = row.select('td')
-            if len(cols) < 9:
-                continue
+                for row in rows:
+                    cols = row.select('td')
+                    if len(cols) < 9:
+                        continue
 
-            date_raw = cols[0].get_text(strip=True)    # "2026.03.19"
-            date     = date_raw.replace('.', '')        # "20260319"
+                    date_raw = cols[0].get_text(strip=True)    # "2026.03.19"
+                    date     = date_raw.replace('.', '')        # "20260319"
 
-            inst_str    = cols[5].get_text(strip=True).replace(',', '')
-            foreign_str = cols[6].get_text(strip=True).replace(',', '')
+                    inst_str    = cols[5].get_text(strip=True).replace(',', '')
+                    foreign_str = cols[6].get_text(strip=True).replace(',', '')
 
-            if not inst_str or not foreign_str:
-                continue
+                    if not inst_str or not foreign_str:
+                        continue
 
-            try:
-                inst    = int(inst_str)
-                foreign = int(foreign_str)
-            except ValueError:
-                continue
+                    try:
+                        inst    = int(inst_str)
+                        foreign = int(foreign_str)
+                    except ValueError:
+                        continue
 
-            data.append({
-                'date':    date,
-                'inst':    inst,
-                'foreign': foreign,
-            })
+                    data.append({
+                        'date':    date,
+                        'inst':    inst,
+                        'foreign': foreign,
+                    })
 
-            if len(data) >= n_days:
-                break
+                    if len(data) >= n_days:
+                        break
+
+            page += 1
 
         if not data:
             return pd.DataFrame()
 
         df = pd.DataFrame(data).set_index('date')
-        return df.iloc[::-1]   # Naver is newest-first; reverse to chronological
+        return df.iloc[::-1]
 
     except Exception as e:
         print(f"[Error] get_naver_historical_investor ({ticker}): {e}")
         return pd.DataFrame()
 
 
-def analyze_double_buying(market="KOSPI"):
+async def analyze_double_buying(market="KOSPI"):
     """
     Identify stocks with simultaneous foreign + institutional net buying.
     Returns dict: { 'new': [...], 'continuous': [...], 'ended': [...] }
     """
-    print(f"[+] Analyzing {market} ...")
+    print(f"[+] Analyzing {market} concurrently...")
 
-    foreign_top = get_naver_rank_tickers("9000", market)
-    inst_top    = get_naver_rank_tickers("1000", market)
+    async with aiohttp.ClientSession() as session:
+        # 동시에 외국인 & 기관 랭킹 조회
+        task1 = get_naver_rank_tickers(session, "9000", market)
+        task2 = get_naver_rank_tickers(session, "1000", market)
+        foreign_top, inst_top = await asyncio.gather(task1, task2)
 
-    candidates = {t['ticker']: t['name'] for t in foreign_top}
-    for t in inst_top:
-        candidates[t['ticker']] = t['name']
+        candidates = {t['ticker']: t['name'] for t in foreign_top}
+        for t in inst_top:
+            candidates[t['ticker']] = t['name']
 
-    # Limit candidates to top 20 to avoid Render timeout (30s)
-    candidate_list = list(candidates.items())[:20]
-    print(f"[+] Processing top {len(candidate_list)} candidates. Fetching history ...")
+        # 비동기이므로 상위 50개까지 안전하게 한 번에 조회 가능
+        candidate_list = list(candidates.items())[:50]
+        print(f"[+] Processing top {len(candidate_list)} candidates concurrently. Fetching history ...")
+
+        # 50개 종목 히스토리 동시 크롤링!
+        tasks = [
+            get_naver_historical_investor(session, code, n_days=20)
+            for code, name in candidate_list
+        ]
+        
+        histories = await asyncio.gather(*tasks)
 
     new_double        = []
     continuous_double = []
     ended_double      = []
 
     for i, (code, name) in enumerate(candidate_list):
+        df = histories[i]
+        if df.empty:
+            continue
+            
         try:
-            df = get_naver_historical_investor(code, n_days=5)
-            if df.empty:
-                continue
-
             df['both'] = (df['foreign'] > 0) & (df['inst'] > 0)
 
             latest = bool(df['both'].iloc[-1])
@@ -161,7 +176,7 @@ def analyze_double_buying(market="KOSPI"):
                 })
 
             elif not latest and prev:
-                # Buying ended today -- only report if streak was >= 2 days
+                # Buying ended today
                 streak = 0
                 for v in reversed(df['both'].values[:-1]):
                     if v:  streak += 1
@@ -181,7 +196,6 @@ def analyze_double_buying(market="KOSPI"):
             print(f"[Error] {name} ({code}): {e}")
 
     new_double.sort(       key=lambda x: x['foreign'] + x['inst'], reverse=True)
-    # Primary: Days (descending), Secondary: Name (ascending)
     continuous_double.sort(key=lambda x: (-x['days'], x['name']))
 
     result = {
@@ -195,4 +209,4 @@ def analyze_double_buying(market="KOSPI"):
 
 
 if __name__ == "__main__":
-    result = analyze_double_buying("KOSPI")
+    result = asyncio.run(analyze_double_buying("KOSPI"))

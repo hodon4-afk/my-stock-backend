@@ -36,7 +36,7 @@ def get_stocks_debug():
     }
 
 @app.get("/api/stocks")
-def get_stocks(market: str = "KOSPI"):
+async def get_stocks(market: str = "KOSPI"):
     # very simple caching: 1 hour
     if market in cache:
         res, timestamp = cache[market]
@@ -44,7 +44,7 @@ def get_stocks(market: str = "KOSPI"):
             return res
             
     try:
-        data = analyze_double_buying(market)
+        data = await analyze_double_buying(market)
         cache[market] = (data, time.time())
         return data
     except Exception as e:
