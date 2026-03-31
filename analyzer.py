@@ -69,13 +69,15 @@ async def get_naver_historical_investor(session, ticker, n_days=20):
                     date_raw = cols[0].get_text(strip=True)    # "2026.03.19"
                     date     = date_raw.replace('.', '')        # "20260319"
 
+                    price_str   = cols[1].get_text(strip=True).replace(',', '')
                     inst_str    = cols[5].get_text(strip=True).replace(',', '')
                     foreign_str = cols[6].get_text(strip=True).replace(',', '')
 
-                    if not inst_str or not foreign_str:
+                    if not inst_str or not foreign_str or not price_str:
                         continue
 
                     try:
+                        price   = int(price_str)
                         inst    = int(inst_str)
                         foreign = int(foreign_str)
                     except ValueError:
@@ -83,6 +85,7 @@ async def get_naver_historical_investor(session, ticker, n_days=20):
 
                     data.append({
                         'date':    date,
+                        'price':   price,
                         'inst':    inst,
                         'foreign': foreign,
                     })
@@ -155,6 +158,7 @@ async def analyze_double_buying(market="KOSPI"):
                     "ticker":  code,
                     "name":    name,
                     "market":  market,
+                    "price":   int(latest_row["price"]),
                     "foreign": int(latest_row["foreign"]),
                     "inst":    int(latest_row["inst"]),
                 })
@@ -169,6 +173,7 @@ async def analyze_double_buying(market="KOSPI"):
                     "ticker":  code,
                     "name":    name,
                     "market":  market,
+                    "price":   int(latest_row["price"]),
                     "foreign": int(latest_row["foreign"]),
                     "inst":    int(latest_row["inst"]),
                     "days":    cont_days,
@@ -187,6 +192,7 @@ async def analyze_double_buying(market="KOSPI"):
                         "ticker":       code,
                         "name":         name,
                         "market":       market,
+                        "price":        int(prev_row["price"]),
                         "foreign_prev": int(prev_row["foreign"]),
                         "inst_prev":    int(prev_row["inst"]),
                         "ended_date":   df.index[-1],
